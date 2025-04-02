@@ -158,7 +158,10 @@ builder.defineStreamHandler(async ({ id }) => {
 
 const PORT = process.env.PORT || 7010;
 const HOST = '0.0.0.0';
+const addonInterface = builder.getInterface();
 
-require("http").createServer(serveHTTP(addonInterface)).listen(PORT, HOST, () => {
-  console.log(`✅ Addon corriendo en: http://${HOST}:${PORT}/manifest.json`);
+require("http")
+  .createServer(serveHTTP(addonInterface))
+  .listen(PORT, HOST, () => {
+    console.log(`✅ Addon corriendo en: http://${HOST}:${PORT}/manifest.json`);
 });
