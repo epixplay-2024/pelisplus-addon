@@ -4,6 +4,8 @@ const cheerio = require("cheerio");
 const playwright = require("playwright");
 const express = require("express");
 
+
+
 // 🧠 Manifest Configuration
 const manifest = {
   id: "org.pelisplus.completeaddon",
@@ -196,37 +198,45 @@ builder.defineStreamHandler(async ({ id }) => {
   }
 });
 
-// 🚀 Configuración del servidor para Render
+// 🚀 CONFIGURACIÓN DEL SERVIDOR (VERSIÓN COMPROBADA)
 const app = express();
 const PORT = process.env.PORT || 10000;
-const HOST = '0.0.0.0';
 
 // 1. Crea la interfaz del addon
 const addonInterface = builder.getInterface();
 
-// 2. Configura rutas específicas
+// 2. Configuración especial para Stremio + Express
+const stremioHandler = serveHTTP(addonInterface, { 
+    staticDir: null, 
+    cacheMaxAge: 0 
+});
+
+// 3. Middleware para rutas de Stremio
+app.use((req, res) => {
+    stremioHandler.handler(req, res);
+});
+
+// 4. Endpoints adicionales
 app.get('/manifest.json', (req, res) => {
-  res.json(manifest);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(manifest));
 });
 
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'healthy' });
+    res.json({ 
+        status: 'online',
+        version: manifest.version,
+        uptime: process.uptime() 
+    });
 });
 
-app.get('/keepalive', (req, res) => {
-  res.send('OK');
-});
-
-// 3. Maneja las rutas de Stremio directamente
-app.all('/*', (req, res) => {
-  serveHTTP(addonInterface)(req, res); // ✅ Forma correcta de integrar
-});
-
-// 4. Inicia el servidor
-app.listen(PORT, HOST, () => {
-  console.log(`
-  🚀 Addon desplegado correctamente!
-  ► URL: http://${HOST}:${PORT}/manifest.json
-  ► Health: http://${HOST}:${PORT}/health
-  `);
+// 5. Inicia el servidor (CON MANEJO DE ERRORES)
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`
+    ✅ ADDON LISTO EN PUERTO ${PORT}
+    ► Manifest: http://localhost:${PORT}/manifest.json
+    ► Health Check: http://localhost:${PORT}/health
+    `);
+}).on('error', (err) => {
+    console.error('🚨 ERROR AL INICIAR:', err);
 });
