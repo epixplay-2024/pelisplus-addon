@@ -157,12 +157,8 @@ builder.defineStreamHandler(async ({ id }) => {
 });
 
 
-// 👇 El builder lo defines antes, como ya tienes en tu código
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 7010;
 
-require("http")
-  .createServer(serveHTTP(builder.getInterface()))
-  .listen(PORT, "0.0.0.0", () => {
-    console.log(`✅ Addon corriendo en: http://0.0.0.0:${PORT}/manifest.json`);
-  });
-
+require("http").createServer(serveHTTP(addonInterface)).listen(PORT, () => {
+  console.log(`✅ Addon corriendo en: http://localhost:${PORT}/manifest.json`);
+});
