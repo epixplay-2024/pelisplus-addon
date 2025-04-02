@@ -156,7 +156,6 @@ builder.defineStreamHandler(async ({ id }) => {
   }
 });
 
-const { serveHTTP } = require("stremio-addon-sdk");
 
 // 👇 El builder lo defines antes, como ya tienes en tu código
 const PORT = process.env.PORT;
