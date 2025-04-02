@@ -158,8 +158,11 @@ builder.defineStreamHandler(async ({ id }) => {
 
 // 🚀 Iniciar servidor correctamente para EvenNode
 
-const PORT = process.env.PORT || 10000; // ¡Forza el puerto 10000 en Render!
+const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
+
+// ¡Esta línea es crucial! Define addonInterface antes de usarlo
+const addonInterface = builder.getInterface();
 
 require("http")
   .createServer(serveHTTP(addonInterface))
