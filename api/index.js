@@ -156,7 +156,8 @@ builder.defineStreamHandler(async ({ id }) => {
   }
 });
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 7010;
+
 
 
 require("http")
