@@ -196,50 +196,37 @@ builder.defineStreamHandler(async ({ id }) => {
   }
 });
 
-// 🚀 Server Configuration for Render
+// 🚀 Configuración del servidor para Render
 const app = express();
 const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'healthy',
-    version: manifest.version
-  });
+// 1. Crea la interfaz del addon
+const addonInterface = builder.getInterface();
+
+// 2. Configura rutas específicas
+app.get('/manifest.json', (req, res) => {
+  res.json(manifest);
 });
 
-// Keepalive endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'healthy' });
+});
+
 app.get('/keepalive', (req, res) => {
   res.send('OK');
 });
 
-// Stremio addon endpoint
-const addonInterface = builder.getInterface();
-app.use(serveHTTP(addonInterface));
-
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).send('Internal Server Error');
+// 3. Maneja las rutas de Stremio directamente
+app.all('/*', (req, res) => {
+  serveHTTP(addonInterface)(req, res); // ✅ Forma correcta de integrar
 });
 
-// Start server
+// 4. Inicia el servidor
 app.listen(PORT, HOST, () => {
   console.log(`
-  🚀 Addon successfully deployed!
-  ► Manifest: http://${HOST}:${PORT}/manifest.json
-  ► Health check: http://${HOST}:${PORT}/health
-  ► Ready for Stremio installation
+  🚀 Addon desplegado correctamente!
+  ► URL: http://${HOST}:${PORT}/manifest.json
+  ► Health: http://${HOST}:${PORT}/health
   `);
-});
-
-// Process management
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received. Shutting down gracefully...');
-  process.exit(0);
-});
-
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled rejection:', err);
 });
