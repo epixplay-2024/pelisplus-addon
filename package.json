@@ -1,11 +1,14 @@
 {
-  "name": "pelisplus-addon-nuevo",
+  "name": "pelisplus-addon",
   "version": "1.0.0",
-  "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "stremio-addon-sdk": "^1.6.10"
+    "stremio-addon-sdk": "^1.6.0",
+    "axios": "^1.6.7",
+    "cheerio": "^1.0.0-rc.12",
+    "playwright": "^1.42.1",
+    "express": "^4.18.2"
   }
 }
