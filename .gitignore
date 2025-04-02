@@ -1,1 +1,9 @@
-.vercel
+# Archivos y carpetas a ignorar
+node_modules/       # Dependencias de npm (no se suben)
+cache_pelisplus.json # Cache local (generado dinámicamente)
+.env                # Variables de entorno sensibles
+.DS_Store           # Archivos de macOS (si usas Apple)
+.vercel             # Carpeta de Vercel (si la usaste)
+dist/               # Si generas builds
+*.log               # Archivos de log
+node_modules
