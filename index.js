@@ -198,45 +198,43 @@ builder.defineStreamHandler(async ({ id }) => {
   }
 });
 
-// 🚀 CONFIGURACIÓN DEL SERVIDOR (VERSIÓN COMPROBADA)
+
+// 🚀 Configuración del servidor CORREGIDA
 const app = express();
 const PORT = process.env.PORT || 10000;
 
 // 1. Crea la interfaz del addon
 const addonInterface = builder.getInterface();
 
-// 2. Configuración especial para Stremio + Express
-const stremioHandler = serveHTTP(addonInterface, { 
-    staticDir: null, 
-    cacheMaxAge: 0 
-});
+// 2. Configura el handler de Stremio (FORMA CORRECTA)
+const stremioHandler = serveHTTP(addonInterface);
 
-// 3. Middleware para rutas de Stremio
+// 3. Middleware para todas las rutas
 app.use((req, res) => {
-    stremioHandler.handler(req, res);
+    // Verifica si es una ruta de Stremio
+    if (req.url.startsWith('/:')) {
+        return stremioHandler(req, res);
+    }
+    // Rutas normales
+    switch(req.url) {
+        case '/manifest.json':
+            res.setHeader('Content-Type', 'application/json');
+            return res.json(manifest);
+        case '/health':
+            return res.json({ status: 'online', version: manifest.version });
+        default:
+            return res.status(404).send('Not Found');
+    }
 });
 
-// 4. Endpoints adicionales
-app.get('/manifest.json', (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    res.send(JSON.stringify(manifest));
-});
-
-app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'online',
-        version: manifest.version,
-        uptime: process.uptime() 
-    });
-});
-
-// 5. Inicia el servidor (CON MANEJO DE ERRORES)
-app.listen(PORT, '0.0.0.0', () => {
+// 4. Inicia el servidor con manejo de errores
+const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`
-    ✅ ADDON LISTO EN PUERTO ${PORT}
-    ► Manifest: http://localhost:${PORT}/manifest.json
-    ► Health Check: http://localhost:${PORT}/health
+    🎬 Addon funcionando en puerto ${PORT}
+    ► URL: http://0.0.0.0:${PORT}/manifest.json
     `);
-}).on('error', (err) => {
-    console.error('🚨 ERROR AL INICIAR:', err);
+});
+
+server.on('error', (err) => {
+    console.error('🚨 Error en el servidor:', err);
 });
