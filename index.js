@@ -2,8 +2,9 @@ const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const playwright = require("playwright");
+const express = require("express");
 
-// 🧠 Manifest
+// 🧠 Manifest Configuration
 const manifest = {
   id: "org.pelisplus.completeaddon",
   version: "1.0.0",
@@ -25,147 +26,220 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// 🧠 Caché simple en memoria
+// 🧠 Memory Cache Configuration
 const catalogCache = new Map();
-const CACHE_TTL = 1000 * 60 * 5; // 5 minutos
+const CACHE_TTL = 1000 * 60 * 5; // 5 minutes cache
+
 const isFresh = (entry) => entry && (Date.now() - entry.timestamp < CACHE_TTL);
 
-// 📦 Catálogo con paginación y caché
+// 📦 Catalog Handler with Improved Error Handling
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
   if (type !== "movie" || id !== "pelisplus-es") return { metas: [] };
 
-  const skip = parseInt(extra?.skip || 0);
-  const limit = parseInt(extra?.limit || 24);
-  const pageNum = Math.floor(skip / limit) + 1;
-
-  const cacheKey = `page-${pageNum}`;
-  console.log(`📄 Solicitando página ${pageNum} (offset ${skip})`);
-
-  if (isFresh(catalogCache.get(cacheKey))) {
-    console.log(`📦 Usando caché para página ${pageNum}`);
-    return { metas: catalogCache.get(cacheKey).data };
-  }
-
-  console.log(`🧪 Scraping página ${pageNum}...`);
-  const metas = [];
-  const browser = await playwright.chromium.launch({ headless: true });
-  const context = await browser.newContext();
-  const page = await context.newPage();
-
   try {
-    const url = `https://pelisplushd.bz/peliculas?page=${pageNum}`;
-    await page.goto(url, { timeout: 60000, waitUntil: "domcontentloaded" });
-    await page.waitForSelector("a.Posters-link", { timeout: 15000 });
+    const skip = parseInt(extra?.skip || 0);
+    const limit = parseInt(extra?.limit || 24);
+    const pageNum = Math.floor(skip / limit) + 1;
+    const cacheKey = `page-${pageNum}`;
+
+    if (isFresh(catalogCache.get(cacheKey))) {
+      return { metas: catalogCache.get(cacheKey).data };
+    }
+
+    console.log(`🧪 Scraping page ${pageNum}...`);
+    const browser = await playwright.chromium.launch({ 
+      headless: true,
+      args: ['--no-sandbox', '--disable-setuid-sandbox'] // Required for Render
+    });
+    
+    const context = await browser.newContext({
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'
+    });
+
+    const page = await context.newPage();
+    await page.goto(`https://pelisplushd.bz/peliculas?page=${pageNum}`, { 
+      timeout: 60000,
+      waitUntil: "networkidle2"
+    });
 
     const movies = await page.$$eval("a.Posters-link", (cards) => {
       return cards.map((card) => {
-        const img = card.querySelector("img");
-        const title = card.querySelector("p")?.innerText?.trim();
-        const link = card.getAttribute("href");
-        const slug = link?.split("/pelicula/")[1];
+        try {
+          const img = card.querySelector("img");
+          const title = card.querySelector("p")?.innerText?.trim();
+          const link = card.getAttribute("href");
+          const slug = link?.split("/pelicula/")[1];
 
-        let poster = img?.getAttribute("src") || img?.getAttribute("data-src") || "";
-        if (!poster.startsWith("http")) {
-          const srcset = img?.getAttribute("srcset");
-          poster = srcset?.split(",")[0]?.split(" ")[0] || "";
-        }
+          let poster = img?.getAttribute("src") || img?.getAttribute("data-src") || "";
+          if (!poster.startsWith("http")) {
+            const srcset = img?.getAttribute("srcset");
+            poster = srcset?.split(",")[0]?.split(" ")[0] || "";
+          }
 
-        if (slug && title && poster.includes("tmdb")) {
-          return {
+          return (slug && title && poster.includes("tmdb")) ? {
             id: slug,
             name: title,
             type: "movie",
             poster,
             background: poster
-          };
+          } : null;
+        } catch (e) {
+          return null;
         }
-        return null;
       }).filter(Boolean);
     });
 
-    metas.push(...movies);
-    console.log(`✅ Página ${pageNum} cargada con ${metas.length} películas`);
-    catalogCache.set(cacheKey, { data: metas, timestamp: Date.now() });
+    catalogCache.set(cacheKey, { data: movies, timestamp: Date.now() });
+    return { metas: movies };
 
   } catch (err) {
-    console.error(`❌ Error en la página ${pageNum}:`, err.message);
-  } finally {
-    await browser.close();
+    console.error(`❌ Catalog error: ${err.message}`);
+    return { metas: [] };
   }
-
-  return { metas };
 });
 
-// 🧠 Meta (sinopsis y fondo) con Playwright
+// 🎭 Meta Handler with Enhanced Selectors
 builder.defineMetaHandler(async ({ id }) => {
   if (id.startsWith("tt")) return { meta: {} };
-  console.log("🧠 Meta solicitada para:", id);
-
-  const browser = await playwright.chromium.launch({ headless: true });
-  const context = await browser.newContext();
-  const page = await context.newPage();
 
   try {
-    await page.goto(`https://pelisplushd.bz/pelicula/${id}`, { timeout: 60000 });
-    await page.waitForSelector(".text-large", { timeout: 10000 });
+    const browser = await playwright.chromium.launch({ 
+      headless: true,
+      args: ['--no-sandbox'] 
+    });
+    const page = await browser.newPage();
+    
+    await page.goto(`https://pelisplushd.bz/pelicula/${id}`, {
+      timeout: 60000,
+      waitUntil: "domcontentloaded"
+    });
 
     const meta = await page.evaluate(() => {
-      const title = document.querySelector("h1")?.innerText?.trim();
-      const description = document.querySelector(".text-large")?.innerText?.trim();
-      const poster = document.querySelector("img")?.getAttribute("src") || "";
+      const getText = (selector) => 
+        document.querySelector(selector)?.innerText?.trim() || "";
+      
+      const getAttr = (selector, attr) =>
+        document.querySelector(selector)?.getAttribute(attr) || "";
 
       return {
         id: window.location.pathname.split("/pelicula/")[1],
-        name: title,
+        name: getText("h1"),
         type: "movie",
-        poster,
-        background: poster,
-        description
+        poster: getAttr(".poster img", "src"),
+        background: getAttr(".backdrop", "style")?.match(/url\(['"]?(.*?)['"]?\)/i)?.[1] || "",
+        description: getText(".description"),
+        cast: Array.from(document.querySelectorAll(".cast-list li")).map(el => el.innerText.trim()),
+        director: getText(".director"),
+        runtime: getText(".duration")
       };
     });
 
     return { meta };
+
   } catch (err) {
-    console.error("❌ Error en meta:", err.message);
+    console.error(`❌ Meta error for ${id}: ${err.message}`);
     return { meta: {} };
-  } finally {
-    await browser.close();
   }
 });
 
-// 🎬 Stream: obtener primer iframe
+// 🎬 Stream Handler with Fallback Options
 builder.defineStreamHandler(async ({ id }) => {
-  console.log("🎬 Stream solicitado para:", id);
   try {
-    const url = `https://pelisplushd.bz/pelicula/${id}`;
-    const res = await axios.get(url);
-    const $ = cheerio.load(res.data);
+    // Primary method: Playwright for dynamic content
+    const browser = await playwright.chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(`https://pelisplushd.bz/pelicula/${id}`, {
+      waitUntil: "networkidle"
+    });
 
-    const iframe = $("iframe").first().attr("src");
-    if (!iframe) throw new Error("No se encontró iframe");
+    const iframeSrc = await page.$eval("iframe", el => el.src);
+    await browser.close();
 
-    return {
-      streams: [{
-        title: "PelisPlusHD",
-        url: iframe
-      }]
-    };
+    if (iframeSrc) {
+      return {
+        streams: [{
+          title: "PelisPlusHD",
+          url: iframeSrc,
+          behaviorHints: {
+            notWebReady: true,
+            proxyHeaders: {
+              "Referer": "https://pelisplushd.bz/"
+            }
+          }
+        }]
+      };
+    }
+
+    // Fallback method: Axios + Cheerio
+    const { data } = await axios.get(`https://pelisplushd.bz/pelicula/${id}`, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+      }
+    });
+    const $ = cheerio.load(data);
+    const fallbackIframe = $("iframe").first().attr("src");
+
+    if (fallbackIframe) {
+      return {
+        streams: [{
+          title: "PelisPlusHD (Fallback)",
+          url: fallbackIframe
+        }]
+      };
+    }
+
+    throw new Error("No stream sources found");
+
   } catch (err) {
-    console.error("❌ Error en stream:", err.message);
+    console.error(`❌ Stream error for ${id}: ${err.message}`);
     return { streams: [] };
   }
 });
 
-// 🚀 Iniciar servidor correctamente para EvenNode
-
+// 🚀 Server Configuration for Render
+const app = express();
 const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
 
-// ¡Esta línea es crucial! Define addonInterface antes de usarlo
-const addonInterface = builder.getInterface();
-
-require("http")
-  .createServer(serveHTTP(addonInterface))
-  .listen(PORT, HOST, () => {
-    console.log(`✅ Addon corriendo en: http://${HOST}:${PORT}/manifest.json`);
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy',
+    version: manifest.version
   });
+});
+
+// Keepalive endpoint
+app.get('/keepalive', (req, res) => {
+  res.send('OK');
+});
+
+// Stremio addon endpoint
+const addonInterface = builder.getInterface();
+app.use(serveHTTP(addonInterface));
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Server error:', err);
+  res.status(500).send('Internal Server Error');
+});
+
+// Start server
+app.listen(PORT, HOST, () => {
+  console.log(`
+  🚀 Addon successfully deployed!
+  ► Manifest: http://${HOST}:${PORT}/manifest.json
+  ► Health check: http://${HOST}:${PORT}/health
+  ► Ready for Stremio installation
+  `);
+});
+
+// Process management
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received. Shutting down gracefully...');
+  process.exit(0);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('Unhandled rejection:', err);
+});
