@@ -34,71 +34,72 @@ const CACHE_TTL = 1000 * 60 * 5; // 5 minutes cache
 
 const isFresh = (entry) => entry && (Date.now() - entry.timestamp < CACHE_TTL);
 
-// 📦 Catalog Handler with Improved Error Handling
+// 📦 Catálogo con paginación y caché
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
   if (type !== "movie" || id !== "pelisplus-es") return { metas: [] };
 
+  const skip = parseInt(extra?.skip || 0);
+  const limit = parseInt(extra?.limit || 24);
+  const pageNum = Math.floor(skip / limit) + 1;
+
+  const cacheKey = `page-${pageNum}`;
+  console.log(`📄 Solicitando página ${pageNum} (offset ${skip})`);
+
+  if (isFresh(catalogCache.get(cacheKey))) {
+    console.log(`📦 Usando caché para página ${pageNum}`);
+    return { metas: catalogCache.get(cacheKey).data };
+  }
+
+  console.log(`🧪 Scraping página ${pageNum}...`);
+  const metas = [];
+  const browser = await playwright.chromium.launch({ headless: true });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
   try {
-    const skip = parseInt(extra?.skip || 0);
-    const limit = parseInt(extra?.limit || 24);
-    const pageNum = Math.floor(skip / limit) + 1;
-    const cacheKey = `page-${pageNum}`;
-
-    if (isFresh(catalogCache.get(cacheKey))) {
-      return { metas: catalogCache.get(cacheKey).data };
-    }
-
-    console.log(`🧪 Scraping page ${pageNum}...`);
-    const browser = await playwright.chromium.launch({ 
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'] // Required for Render
-    });
-    
-    const context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/90.0.4430.212 Safari/537.36'
-    });
-
-    const page = await context.newPage();
-    await page.goto(`https://pelisplushd.bz/peliculas?page=${pageNum}`, { 
-      timeout: 60000,
-      waitUntil: "networkidle2"
-    });
+    const url = `https://pelisplushd.bz/peliculas?page=${pageNum}`;
+    await page.goto(url, { timeout: 60000, waitUntil: "domcontentloaded" });
+    await page.waitForSelector("a.Posters-link", { timeout: 15000 });
 
     const movies = await page.$$eval("a.Posters-link", (cards) => {
       return cards.map((card) => {
-        try {
-          const img = card.querySelector("img");
-          const title = card.querySelector("p")?.innerText?.trim();
-          const link = card.getAttribute("href");
-          const slug = link?.split("/pelicula/")[1];
+        const img = card.querySelector("img");
+        const title = card.querySelector("p")?.innerText?.trim();
+        const link = card.getAttribute("href");
+        const slug = link?.split("/pelicula/")[1];
 
-          let poster = img?.getAttribute("src") || img?.getAttribute("data-src") || "";
-          if (!poster.startsWith("http")) {
-            const srcset = img?.getAttribute("srcset");
-            poster = srcset?.split(",")[0]?.split(" ")[0] || "";
-          }
+        let poster = img?.getAttribute("src") || img?.getAttribute("data-src") || "";
+        if (!poster.startsWith("http")) {
+          const srcset = img?.getAttribute("srcset");
+          poster = srcset?.split(",")[0]?.split(" ")[0] || "";
+        }
 
-          return (slug && title && poster.includes("tmdb")) ? {
+        if (slug && title && poster.includes("tmdb")) {
+          return {
             id: slug,
             name: title,
             type: "movie",
             poster,
             background: poster
-          } : null;
-        } catch (e) {
-          return null;
+          };
         }
+        return null;
       }).filter(Boolean);
     });
 
-    catalogCache.set(cacheKey, { data: movies, timestamp: Date.now() });
-    return { metas: movies };
+    metas.push(...movies);
+    console.log(`✅ Página ${pageNum} cargada con ${metas.length} películas`);
+    catalogCache.set(cacheKey, { data: metas, timestamp: Date.now() });
 
   } catch (err) {
-    console.error(`❌ Catalog error: ${err.message}`);
-    return { metas: [] };
+    console.error(`❌ Error en la página ${pageNum}:`, err.message);
+  } finally {
+    await browser.close();
   }
+
+  return { metas };
 });
+
 
 // 🎭 Meta Handler with Enhanced Selectors
 builder.defineMetaHandler(async ({ id }) => {
