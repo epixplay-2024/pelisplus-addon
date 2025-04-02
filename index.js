@@ -101,104 +101,65 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
 });
 
 
-// 🎭 Meta Handler with Enhanced Selectors
+// 🧠 Meta (sinopsis y fondo) con Playwright
 builder.defineMetaHandler(async ({ id }) => {
   if (id.startsWith("tt")) return { meta: {} };
+  console.log("🧠 Meta solicitada para:", id);
+
+  const browser = await playwright.chromium.launch({ headless: true });
+  const context = await browser.newContext();
+  const page = await context.newPage();
 
   try {
-    const browser = await playwright.chromium.launch({ 
-      headless: true,
-      args: ['--no-sandbox'] 
-    });
-    const page = await browser.newPage();
-    
-    await page.goto(`https://pelisplushd.bz/pelicula/${id}`, {
-      timeout: 60000,
-      waitUntil: "domcontentloaded"
-    });
+    await page.goto(`https://pelisplushd.bz/pelicula/${id}`, { timeout: 60000 });
+    await page.waitForSelector(".text-large", { timeout: 10000 });
 
     const meta = await page.evaluate(() => {
-      const getText = (selector) => 
-        document.querySelector(selector)?.innerText?.trim() || "";
-      
-      const getAttr = (selector, attr) =>
-        document.querySelector(selector)?.getAttribute(attr) || "";
+      const title = document.querySelector("h1")?.innerText?.trim();
+      const description = document.querySelector(".text-large")?.innerText?.trim();
+      const poster = document.querySelector("img")?.getAttribute("src") || "";
 
       return {
         id: window.location.pathname.split("/pelicula/")[1],
-        name: getText("h1"),
+        name: title,
         type: "movie",
-        poster: getAttr(".poster img", "src"),
-        background: getAttr(".backdrop", "style")?.match(/url\(['"]?(.*?)['"]?\)/i)?.[1] || "",
-        description: getText(".description"),
-        cast: Array.from(document.querySelectorAll(".cast-list li")).map(el => el.innerText.trim()),
-        director: getText(".director"),
-        runtime: getText(".duration")
+        poster,
+        background: poster,
+        description
       };
     });
 
     return { meta };
-
   } catch (err) {
-    console.error(`❌ Meta error for ${id}: ${err.message}`);
+    console.error("❌ Error en meta:", err.message);
     return { meta: {} };
+  } finally {
+    await browser.close();
   }
 });
 
-// 🎬 Stream Handler with Fallback Options
+// 🎬 Stream: obtener primer iframe
 builder.defineStreamHandler(async ({ id }) => {
+  console.log("🎬 Stream solicitado para:", id);
   try {
-    // Primary method: Playwright for dynamic content
-    const browser = await playwright.chromium.launch({ headless: true });
-    const page = await browser.newPage();
-    await page.goto(`https://pelisplushd.bz/pelicula/${id}`, {
-      waitUntil: "networkidle"
-    });
+    const url = `https://pelisplushd.bz/pelicula/${id}`;
+    const res = await axios.get(url);
+    const $ = cheerio.load(res.data);
 
-    const iframeSrc = await page.$eval("iframe", el => el.src);
-    await browser.close();
+    const iframe = $("iframe").first().attr("src");
+    if (!iframe) throw new Error("No se encontró iframe");
 
-    if (iframeSrc) {
-      return {
-        streams: [{
-          title: "PelisPlusHD",
-          url: iframeSrc,
-          behaviorHints: {
-            notWebReady: true,
-            proxyHeaders: {
-              "Referer": "https://pelisplushd.bz/"
-            }
-          }
-        }]
-      };
-    }
-
-    // Fallback method: Axios + Cheerio
-    const { data } = await axios.get(`https://pelisplushd.bz/pelicula/${id}`, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-      }
-    });
-    const $ = cheerio.load(data);
-    const fallbackIframe = $("iframe").first().attr("src");
-
-    if (fallbackIframe) {
-      return {
-        streams: [{
-          title: "PelisPlusHD (Fallback)",
-          url: fallbackIframe
-        }]
-      };
-    }
-
-    throw new Error("No stream sources found");
-
+    return {
+      streams: [{
+        title: "PelisPlusHD",
+        url: iframe
+      }]
+    };
   } catch (err) {
-    console.error(`❌ Stream error for ${id}: ${err.message}`);
+    console.error("❌ Error en stream:", err.message);
     return { streams: [] };
   }
 });
-
 
 // 🚀 Configuración del servidor CORREGIDA
 const app = express();
