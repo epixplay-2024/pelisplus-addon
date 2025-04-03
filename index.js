@@ -3,6 +3,8 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 const playwright = require("playwright");
 const express = require("express");
+const cors = require("cors");
+
 
 
 
@@ -163,6 +165,22 @@ builder.defineStreamHandler(async ({ id }) => {
 
 // 🚀 Configuración del servidor CORREGIDA
 const app = express();
+
+
+// Habilita CORS globalmente
+app.use(cors());
+// Para todas las rutas, usa el handler de Stremio con CORS habilitado
+app.use(serveHTTP(builder.getInterface(), { cors: true }));
+
+// Rutas adicionales: para obtener el manifest y un health check
+app.get("/manifest.json", (req, res) => {
+  res.json(manifest);
+});
+app.get("/health", (req, res) => {
+  res.json({ status: "online", version: manifest.version });
+});
+
+
 const PORT = process.env.PORT || 10000;
 
 // 1. Crea la interfaz del addon
