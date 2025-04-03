@@ -1,12 +1,11 @@
+const express = require("express");
+const cors = require("cors");
 const { addonBuilder, serveHTTP } = require("stremio-addon-sdk");
 const axios = require("axios");
 const cheerio = require("cheerio");
 const playwright = require("playwright");
-const express = require("express");
 
-
-
-// 🧠 Manifest Configuration
+// ── Manifest Configuration ──
 const manifest = {
   id: "org.pelisplus.completeaddon",
   version: "1.0.0",
@@ -28,20 +27,19 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// 🧠 Memory Cache Configuration
+// ── Memory Cache Configuration ──
 const catalogCache = new Map();
-const CACHE_TTL = 1000 * 60 * 5; // 5 minutes cache
+const CACHE_TTL = 1000 * 60 * 5; // 5 minutes
 
 const isFresh = (entry) => entry && (Date.now() - entry.timestamp < CACHE_TTL);
 
-// 📦 Catálogo con paginación y caché
+// ── Define Catalog Handler ──
 builder.defineCatalogHandler(async ({ type, id, extra }) => {
   if (type !== "movie" || id !== "pelisplus-es") return { metas: [] };
 
   const skip = parseInt(extra?.skip || 0);
   const limit = parseInt(extra?.limit || 24);
   const pageNum = Math.floor(skip / limit) + 1;
-
   const cacheKey = `page-${pageNum}`;
   console.log(`📄 Solicitando página ${pageNum} (offset ${skip})`);
 
@@ -67,13 +65,11 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
         const title = card.querySelector("p")?.innerText?.trim();
         const link = card.getAttribute("href");
         const slug = link?.split("/pelicula/")[1];
-
         let poster = img?.getAttribute("src") || img?.getAttribute("data-src") || "";
         if (!poster.startsWith("http")) {
           const srcset = img?.getAttribute("srcset");
           poster = srcset?.split(",")[0]?.split(" ")[0] || "";
         }
-
         if (slug && title && poster.includes("tmdb")) {
           return {
             id: slug,
@@ -90,22 +86,18 @@ builder.defineCatalogHandler(async ({ type, id, extra }) => {
     metas.push(...movies);
     console.log(`✅ Página ${pageNum} cargada con ${metas.length} películas`);
     catalogCache.set(cacheKey, { data: metas, timestamp: Date.now() });
-
   } catch (err) {
     console.error(`❌ Error en la página ${pageNum}:`, err.message);
   } finally {
     await browser.close();
   }
-
   return { metas };
 });
 
-
-// 🧠 Meta (sinopsis y fondo) con Playwright
+// ── Define Meta Handler ──
 builder.defineMetaHandler(async ({ id }) => {
   if (id.startsWith("tt")) return { meta: {} };
   console.log("🧠 Meta solicitada para:", id);
-
   const browser = await playwright.chromium.launch({ headless: true });
   const context = await browser.newContext();
   const page = await context.newPage();
@@ -113,12 +105,10 @@ builder.defineMetaHandler(async ({ id }) => {
   try {
     await page.goto(`https://pelisplushd.bz/pelicula/${id}`, { timeout: 60000 });
     await page.waitForSelector(".text-large", { timeout: 10000 });
-
     const meta = await page.evaluate(() => {
       const title = document.querySelector("h1")?.innerText?.trim();
       const description = document.querySelector(".text-large")?.innerText?.trim();
       const poster = document.querySelector("img")?.getAttribute("src") || "";
-
       return {
         id: window.location.pathname.split("/pelicula/")[1],
         name: title,
@@ -128,7 +118,6 @@ builder.defineMetaHandler(async ({ id }) => {
         description
       };
     });
-
     return { meta };
   } catch (err) {
     console.error("❌ Error en meta:", err.message);
@@ -138,17 +127,15 @@ builder.defineMetaHandler(async ({ id }) => {
   }
 });
 
-// 🎬 Stream: obtener primer iframe
+// ── Define Stream Handler ──
 builder.defineStreamHandler(async ({ id }) => {
   console.log("🎬 Stream solicitado para:", id);
   try {
     const url = `https://pelisplushd.bz/pelicula/${id}`;
     const res = await axios.get(url);
     const $ = cheerio.load(res.data);
-
     const iframe = $("iframe").first().attr("src");
     if (!iframe) throw new Error("No se encontró iframe");
-
     return {
       streams: [{
         title: "PelisPlusHD",
@@ -161,42 +148,29 @@ builder.defineStreamHandler(async ({ id }) => {
   }
 });
 
-// 🚀 Configuración del servidor CORREGIDA
+// ── Configuración del servidor con Express ──
+const express = require("express");
+const cors = require("cors");
 const app = express();
-const PORT = process.env.PORT || 10000;
 
-// 1. Crea la interfaz del addon
-const addonInterface = builder.getInterface();
+// Habilitar CORS para todas las peticiones
+app.use(cors());
 
-// 2. Configura el handler de Stremio (FORMA CORRECTA)
-const stremioHandler = serveHTTP(addonInterface);
+// Aquí usaremos serveHTTP para todas las peticiones relacionadas con Stremio
+app.use(serveHTTP(builder.getInterface(), { cors: true }));
 
-// 3. Middleware para todas las rutas
-app.use((req, res) => {
-    // Verifica si es una ruta de Stremio
-    if (req.url.startsWith('/:')) {
-        return stremioHandler(req, res);
-    }
-    // Rutas normales
-    switch(req.url) {
-        case '/manifest.json':
-            res.setHeader('Content-Type', 'application/json');
-            return res.json(manifest);
-        case '/health':
-            return res.json({ status: 'online', version: manifest.version });
-        default:
-            return res.status(404).send('Not Found');
-    }
+// Rutas adicionales: manifest y health
+app.get("/manifest.json", (req, res) => {
+  res.json(manifest);
+});
+app.get("/health", (req, res) => {
+  res.json({ status: "online", version: manifest.version });
 });
 
-// 4. Inicia el servidor con manejo de errores
-const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`
-    🎬 Addon funcionando en puerto ${PORT}
-    ► URL: http://0.0.0.0:${PORT}/manifest.json
-    `);
-});
+// Inicia el servidor
+const PORT = process.env.PORT; // Render o host asignan el puerto mediante process.env.PORT
+const HOST = "0.0.0.0";
 
-server.on('error', (err) => {
-    console.error('🚨 Error en el servidor:', err);
+app.listen(PORT, HOST, () => {
+  console.log(`✅ Addon corriendo en: http://${HOST}:${PORT}/manifest.json`);
 });
